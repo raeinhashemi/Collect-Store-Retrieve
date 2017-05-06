@@ -1,6 +1,10 @@
 # Collect-Store-Retrieve
-Web Scraping of Yelp depending on user's search terms.
-Storing the data into a sqlite database.
-Querying the data however we like.
+##Web Scraping of Yelp depending on user's search terms.
+##Storing the data into a sqlite database.
+##Querying the data however we like.
 
-P.S: One advantage of this code is the feature of sorting Yelp results based on their star ratings which Yelp doesn't have!
+##P.S: One advantage of this code is the feature of sorting Yelp results based on their star ratings which Yelp doesn't have!
+
+### My idea for this project is to build a database consisting of all kinds of local businesses with their attributes like their names, the price for their services, their review count, telephone number and etc. The focus for me is to be able to search for these businesses with broader domain, without the focus on just one attribute. For example, Yelp has this kind of data but users have to search for a specific type of business to get results. What if they wanted to combine two or more kinds of local businesses with for example a low price range? They also have to specify a city or neighborhood to get results from, when with this database they can combine results with different cities or neighborhoods. These restrictions can be averted by collecting the data from websites like Yelp and putting them in a database and retrieve data with whatever filters we want.
+
+### I will parse the data in YELP search pages. It provides some attributes such as Name, Type, Price, number of reviews and the Tell number for each element. The Elements could be restaurants, bars, coffee-shops or so many other places. Then the user is able to choose which information he/she wants as an output. For different cities and neighborhoods, I have to send multiple requests to Yelp and combine the results. Each time the user sends a request, the collected data is stored in our local database. The next time we want to search within this domain, the program won't send a request to Yelp, instead our database will be used. It will work as a cache. If the data is within our database, it will be retrieved immediately. But if it's not there, the database will be updated with new data from the Yelp website. Collect, Store and Retrieve.
