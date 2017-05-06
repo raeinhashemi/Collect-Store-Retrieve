@@ -1,0 +1,454 @@
+---
+title: "Final"
+author: "Raein Hashemi"
+date: "December 7, 2016"
+output: pdf_document
+---
+
+### My idea for this project is to build a database consisting of all kinds of local businesses with their attributes like their names, the price for their services, their review count, telephone number and etc. The focus for me is to be able to search for these businesses with broader domain, without the focus on just one attribute. For example, Yelp has this kind of data but users have to search for a specific type of business to get results. What if they wanted to combine two or more kinds of local businesses with for example a low price range? They also have to specify a city or neighborhood to get results from, when with this database they can combine results with different cities or neighborhoods. These restrictions can be averted by collecting the data from websites like Yelp and putting them in a database and retrieve data with whatever filters we want.
+
+### I will parse the data in YELP search pages. It provides some attributes such as Name, Type, Price, number of reviews and the Tell number for each element. The Elements could be restaurants, bars, coffee-shops or so many other places. Then the user is able to choose which information he/she wants as an output. For different cities and neighborhoods, I have to send multiple requests to Yelp and combine the results. Each time the user sends a request, the collected data is stored in our local database. The next time we want to search within this domain, the program won't send a request to Yelp, instead our database will be used. It will work as a cache. If the data is within our database, it will be retrieved immediately. But if it's not there, the database will be updated with new data from the Yelp website. Collect, Store and Retrieve.
+
+```{r}
+
+cat("\014")       #This clears the Consol
+rm(list=ls())     #This removes all the variables previously existed in Global Environment.
+
+library(RCurl)
+library(XML)
+library(httr)
+library(sqldf)
+
+db <- dbConnect(SQLite(), dbname="SBDB.sqlite")
+
+tableSize <- dbListTables(conn=db)
+
+# If file didn't exist or it didn't have any tables, create a new one
+if(length(tableSize) == 0) {
+  
+  sqldf("attach 'SBDB.sqlite' as new")
+  
+  dbSendQuery(conn = db,
+            "CREATE TABLE SmallB(DataID INTEGER primary key autoincrement,
+            ID INTEGER,
+            Name TEXT,
+            Type TEXT,
+            Price INTEGER,
+            Score INTEGER,
+            Reviews INTEGER,
+            Phone TEXT,
+            Address TEXT,
+            Business TEXT,
+            Location TEXT)")
+}
+
+# YelpParse Function parses data in the YELP search pages. It provides Name, Type, Price,
+# Score, number of Reviews, Phone number and the Address for each element.
+# The Elements could be restaurants or bars or coffee-shops or so many other places.
+# User is able to choose which information he/she wants as output by putting the names of
+# the Business and their Location in the correponding places for input.
+
+YelpParse <- function(page, business, location) {
+
+          ################################################################
+          
+          # This is the URL of the website we need to scrape and get information
+          
+          link <- paste("http://www.yelp.com/search?find_desc=", business,
+                        "&find_loc=", location, "&start=", as.character(page*10),
+                        "&sortby=review_count", sep="")
+  
+          theurl <- link
+          theurl <- gsub(" ","",theurl)   #No extra spaces
+          
+          webpage <- getURL(theurl, .opts=curlOptions(followlocation = TRUE))
+          
+          # convert the page into a line-by-line format rather than a single string
+          tc <- textConnection(webpage)
+          #webpage is now a vector of string each elament is a line of string
+          webpage <- readLines(tc)
+          close(tc)
+          
+          pagetree <- htmlTreeParse(webpage, useInternalNodes = TRUE)  #pagetree is now in html format and parsable with xpath syntax.
+          
+          
+          
+          #########################  NAME  ###############################
+          
+          business.name <- unlist(xpathApply(pagetree,
+                                    "//*/span[@class='indexed-biz-name']/a[@*][@*][@*]", xmlValue))
+          
+          if(length(business.name) == 11) # Sometimes it gives 11 elements and the first one is wrong
+              business.name <- business.name[2:11]
+          
+          business.name <- as.character(business.name)
+          business.name <- gsub("\u0092", "", business.name)
+          business.name
+          
+          ############################   REVIEW SCORE  #############################
+    
+          review.score <- unlist(xpathApply(pagetree,
+                                  "//*/img[@class='offscreen']", xmlGetAttr, "alt"))
+          review.score
+          
+          if(length(review.score) < 10)
+            review.score <- rep.int("0", 10)
+          
+          review.score <- gsub(" star rating", "", review.score) #Removing extra characters"
+          review.score <- gsub("\n            ", "", review.score)
+          review.score <- gsub("\n    ", "", review.score)
+          
+          if(length(review.score) == 11)
+              review.score <- review.score[2:11]
+          
+          review.score <- as.numeric(review.score)
+          review.score
+          
+          ############################   REVIEW COUNT  #############################
+    
+          review.count <- unlist(xpathApply(pagetree,
+                                  "//*/span[@class='review-count rating-qualifier']",xmlValue))
+          review.count
+          
+          if(length(review.count) < 10)
+            review.count <- rep.int("0", 10)
+          
+          review.count <- gsub("\n            ", "", review.count) #Removing extra characters"
+          review.count <- gsub("\n    ", "", review.count)
+          review.count <- gsub(" reviews", "", review.count)
+          review.count <- gsub(" review", "", review.count)
+          
+          if(length(review.count) == 11)
+              review.count <- review.count[2:11]
+          
+          review.count <- as.numeric(review.count)
+          review.count
+          
+          ############################# PRICE #############################
+          
+          business.price <- unlist(xpathApply(pagetree,
+                                  "//*/span[@class='business-attribute price-range']",xmlValue))
+          business.price
+          
+          if(length(business.price) != 0)
+            for (i in 1:length(business.price)) # Scaling price notations to 1,2,3,4
+            {
+                if (business.price[i]=="$")  {business.price[i]="1" }
+                if (business.price[i]=="$$")  {business.price[i]="2" }
+                if (business.price[i]=="$$$")  {business.price[i]="3" }
+                if (business.price[i]=="$$$$")  {business.price[i]="4" }
+            }
+          
+          else business.price <- "0"
+          
+          business.price
+          
+          if(length(business.price) == 11)
+              business.price<-business.price[2:11]
+          
+          business.price <- as.numeric(business.price)
+          business.price
+          
+          
+          #########################  TYPE   ############################
+          
+          # Some times there are several <a> tags. We need the first one.
+          business.type <- unlist(xpathApply(pagetree,
+                                           "//*/span[@class='category-str-list']/a[@*][1]",xmlValue))
+          
+          if(length(business.type) == 11)
+              business.type <- business.type[2:11]
+          
+          business.type <- as.character(business.type)
+          business.type
+          
+          ########################   ADDRESS  ###############################
+          
+          business.address <- unlist(xpathApply(pagetree, "//*/address",xmlValue))
+          
+          business.address <- gsub("\n    ", "", business.address)
+          business.address <- gsub("\n", "", business.address)
+          business.address <- gsub("'", "", business.address)
+          
+          if(length(business.address) == 11)
+              business.address<-business.address[2:11]
+          
+          business.address <- as.character(business.address)
+          business.address
+          
+          ############################  TELL  ##############################
+          
+          business.tell <- unlist(xpathApply(pagetree,
+                            "//*/div[@class='secondary-attributes']/span[@class='biz-phone']", xmlValue))
+          
+          business.tell <- gsub("\n        ", "", business.tell)
+          business.tell <- gsub("\n    ", "", business.tell)
+          
+          if(length(business.tell) == 11)
+              business.tell<-business.tell[2:11]
+          
+          business.tell <- as.character(business.tell)
+          business.tell
+          
+          
+          ############################### Putting ALL in a DATA FRAME ##############################
+          
+          
+          business.data <- data.frame(NAME=business.name,
+                                        TYPE=business.type,
+                                        PRICE= business.price,
+                                        SCORE= review.score,
+                                        REVIEW_COUNT=review.count,
+                                        TELL=business.tell,
+                                        ADD=business.address,
+                                        BUS=business,
+                                        LOC=location)
+          
+          return (business.data);
+}
+
+#### Beginning of Data Collection, Storage and Retrieval
+
+# empty result set
+business.data <- data.frame();
+
+# 150 results (15 pages of 10 results) for Restaurants in Boston
+for (i in 0:14) { # 15 pages
+  
+  # Use the function to fetch data, one page at a time (10 results per page)
+  business.data <- YelpParse(i, "Restaurants", "Boston")
+
+  # Collect the data, and set the ID attribute based on whether it's been in our database or not
+  for(j in 1:10) # 10 results per page
+    dbSendQuery(conn = db,
+            paste("INSERT OR REPLACE INTO SmallB
+                  (ID, Name, Type, Price, Score, Reviews, Phone, Address, Business, Location)
+                  VALUES (COALESCE((select ID from SmallB where Name = '",
+              as.character(business.data[j,]$NAME), "' and TYPE = '",
+              as.character(business.data[j,]$TYPE), "'),", as.character(i*10+j) ,"), '",
+              
+              as.character(business.data[j,]$NAME), "', '",
+              as.character(business.data[j,]$TYPE), "', ", 
+              as.character(business.data[j,]$PRICE), ", ", 
+              as.character(business.data[j,]$SCORE), ", ", 
+              as.character(business.data[j,]$REVIEW_COUNT), ", '", 
+              as.character(business.data[j,]$TELL), "', '", 
+              as.character(business.data[j,]$ADD), "', '", 
+              as.character(business.data[j,]$BUS), "', '", 
+              as.character(business.data[j,]$LOC), "')"))
+  
+}
+
+# 150 results (15 pages of 10 results) for Restaurants in San Francisco
+for (i in 0:14) { # 15 pages
+  
+  # Use the function to fetch data, one page at a time (10 results per page)
+  business.data <- YelpParse(i, "Restaurants", "San Francisco")
+
+  # Collect the data, and set the ID attribute based on whether it's been in our database or not
+  for(j in 1:10) # 10 results per page
+    dbSendQuery(conn = db,
+            paste("INSERT OR REPLACE INTO SmallB
+                  (ID, Name, Type, Price, Score, Reviews, Phone, Address, Business, Location)
+                  VALUES (COALESCE((select ID from SmallB where Name = '",
+              as.character(business.data[j,]$NAME), "' and TYPE = '",
+              as.character(business.data[j,]$TYPE), "'),", as.character(i*10+j) ,"), '",
+              
+              as.character(business.data[j,]$NAME), "', '", 
+              as.character(business.data[j,]$TYPE), "', ", 
+              as.character(business.data[j,]$PRICE), ", ", 
+              as.character(business.data[j,]$SCORE), ", ", 
+              as.character(business.data[j,]$REVIEW_COUNT), ", '", 
+              as.character(business.data[j,]$TELL), "', '", 
+              as.character(business.data[j,]$ADD), "', '", 
+              as.character(business.data[j,]$BUS), "', '", 
+              as.character(business.data[j,]$LOC), "')"))
+  
+}
+
+# Delete duplicate results
+dbSendQuery(conn = db,
+            "DELETE FROM SmallB WHERE DataID NOT IN (
+                SELECT min(DataID)
+                FROM SmallB
+                GROUP BY ID, Business, Location
+              )")
+
+```
+
+## Now we can answer our questions:
+
+### 1) Show the names and ratings of high cost Restaurants in both Boston and San Francisco.
+
+```{r}
+
+dbGetQuery(conn = db, paste("SELECT Name,Type,Score,Price,Location FROM SmallB
+                        WHERE (Location = ", "\"", "Boston", "\"", 
+                        " OR Location = ", "\"", "San Francisco", "\")", 
+                        " AND Business = ", "\"", "Restaurants", "\"",
+                        " AND Price = '4'"))
+
+```
+
+### 2) What are the top rated hospitals with +100 reviews in Boston?
+
+```{r}
+
+# 100 results (10 pages of 10 results) for Hospitals in Boston
+for (i in 0:9) { # 10 pages
+  
+  # Use the function to fetch data, one page at a time (10 results per page)
+  business.data <- YelpParse(i, "Hospitals", "Boston")
+
+  # Collect the data, and set the ID attribute based on whether it's been in our database or not
+  for(j in 1:10) # 10 results per page
+    dbSendQuery(conn = db,
+            paste("INSERT OR REPLACE INTO SmallB
+                  (ID, Name, Type, Price, Score, Reviews, Phone, Address, Business, Location)
+                  VALUES (COALESCE((select ID from SmallB where Name = '",
+              as.character(business.data[j,]$NAME), "' and Type = '",
+              as.character(business.data[j,]$TYPE), "' and Address = '",
+              as.character(business.data[j,]$ADD), "'),", as.character(i*10+j) ,"), '",
+              
+              as.character(business.data[j,]$NAME), "', '", 
+              as.character(business.data[j,]$TYPE), "', ", 
+              as.character(business.data[j,]$PRICE), ", ", 
+              as.character(business.data[j,]$SCORE), ", ", 
+              as.character(business.data[j,]$REVIEW_COUNT), ", '", 
+              as.character(business.data[j,]$TELL), "', '", 
+              as.character(business.data[j,]$ADD), "', '", 
+              as.character(business.data[j,]$BUS), "', '", 
+              as.character(business.data[j,]$LOC), "')"))
+  
+}
+
+# Delete duplicate results
+dbSendQuery(conn = db,
+            "DELETE FROM SmallB WHERE DataID NOT IN (
+                SELECT min(DataID)
+                FROM SmallB
+                GROUP BY ID, Business, Location
+              )")
+
+dbGetQuery(conn = db, paste("SELECT Name,Type,Reviews,Score,Location FROM SmallB
+                        WHERE Location = ", "\"", "Boston", "\"",
+                        " AND Business = ", "\"", "Hospitals", "\"",
+                        " AND Reviews > '100'",
+                        " AND Score >= '3'"))
+
+```
+
+### 3) What types of restaurants are least and most expensive in San Francisco?
+
+```{r}
+
+dbGetQuery(conn = db, paste("SELECT Type,Price,Location FROM SmallB
+                        WHERE Location = ", "\"", "San Francisco", "\"",
+                        " AND Business = ", "\"", "Restaurants", "\"",
+                        " AND (Price = '1'",
+                        " OR Price = '4')",
+                        " GROUP BY Type",
+                        " ORDER BY Price Desc"))
+
+```
+
+### 4) List the best restaurants in San Francisco? (lower price, higher score, higher review count)
+
+```{r}
+
+dbGetQuery(conn = db, paste("SELECT Name,Price,Score,Reviews,Location FROM SmallB
+                        WHERE Location = ", "\"", "San Francisco", "\"",
+                        " AND Business = ", "\"", "Restaurants", "\"",
+                        " ORDER BY Price ASC,",
+                        " Score DESC, Reviews DESC"))
+
+```
+
+### 5) List the best meeting places in Boston? (restaurants, bars and coffee shops)
+
+```{r}
+
+# 100 results (10 pages of 10 results) for Bars in Boston
+for (i in 0:9) { # 10 pages
+  
+  # Use the function to fetch data, one page at a time (10 results per page)
+  business.data <- YelpParse(i, "Bars", "Boston")
+
+  # Collect the data, and set the ID attribute based on whether it's been in our database or not
+  for(j in 1:10) # 10 results per page
+    dbSendQuery(conn = db,
+            paste("INSERT OR REPLACE INTO SmallB
+                  (ID, Name, Type, Price, Score, Reviews, Phone, Address, Business, Location)
+                  VALUES (COALESCE((select ID from SmallB where Name = '",
+              as.character(business.data[j,]$NAME), "' and TYPE = '",
+              as.character(business.data[j,]$TYPE), "'),", as.character(i*10+j) ,"), '",
+              
+              as.character(business.data[j,]$NAME), "', '",
+              as.character(business.data[j,]$TYPE), "', ", 
+              as.character(business.data[j,]$PRICE), ", ", 
+              as.character(business.data[j,]$SCORE), ", ", 
+              as.character(business.data[j,]$REVIEW_COUNT), ", '", 
+              as.character(business.data[j,]$TELL), "', '", 
+              as.character(business.data[j,]$ADD), "', '", 
+              as.character(business.data[j,]$BUS), "', '", 
+              as.character(business.data[j,]$LOC), "')"))
+  
+}
+
+# 100 results (10 pages of 10 results) for Coffee shops in Boston
+for (i in 0:9) { # 10 pages
+  
+  # Use the function to fetch data, one page at a time (10 results per page)
+  business.data <- YelpParse(i, "Coffeeshops", "Boston")
+
+  # Collect the data, and set the ID attribute based on whether it's been in our database or not
+  for(j in 1:10) # 10 results per page
+    dbSendQuery(conn = db,
+            paste("INSERT OR REPLACE INTO SmallB
+                  (ID, Name, Type, Price, Score, Reviews, Phone, Address, Business, Location)
+                  VALUES (COALESCE((select ID from SmallB where Name = '",
+              as.character(business.data[j,]$NAME), "' and TYPE = '",
+              as.character(business.data[j,]$TYPE), "'),", as.character(i*10+j) ,"), '",
+              
+              as.character(business.data[j,]$NAME), "', '",
+              as.character(business.data[j,]$TYPE), "', ", 
+              as.character(business.data[j,]$PRICE), ", ", 
+              as.character(business.data[j,]$SCORE), ", ", 
+              as.character(business.data[j,]$REVIEW_COUNT), ", '", 
+              as.character(business.data[j,]$TELL), "', '", 
+              as.character(business.data[j,]$ADD), "', '", 
+              as.character(business.data[j,]$BUS), "', '", 
+              as.character(business.data[j,]$LOC), "')"))
+  
+}
+
+# Delete duplicate results
+dbSendQuery(conn = db,
+            "DELETE FROM SmallB WHERE DataID NOT IN (
+                SELECT min(DataID)
+                FROM SmallB
+                GROUP BY ID, Business, Location, Address
+              )")
+
+dbGetQuery(conn = db, paste("SELECT Name,Price,Score,Reviews,Business,Location FROM SmallB
+                        WHERE Location = ", "\"", "Boston", "\"",
+                        " AND Price >= '2'",
+                        " AND (Business = ", "\"", "Restaurants", "\"",
+                        " OR Business = ", "\"", "Bars", "\"",
+                        " OR Business = ", "\"", "Coffeeshops", "\")",
+                        " ORDER BY Price ASC,",
+                        " Score DESC, Reviews DESC LIMIT 20"))
+
+```
+
+### For validation I checked every result with the Yelp website. So they are collected, saved and retrieved correctly, because if either of those steps had a problem I wouldn't be getting the results matching with Yelp.
+
+### The ER model would be a single table because all the data I collected are attributes of small businesses (Name, Type, Price, Score, Reviews, Address, Phone) and not another entity. I could have used another table for addresses, but having that I had to add lots of other Keys for the new table and also foreign keys for the main table, all for a few businesses that have multiple branches. It didn't seem efficient so I didn't use it.
+
+### These were the questions that neither Yelp nor any other similar website would be able to answer. I have collected the data from these sources, stored them in my database and retrieved whatever information I wanted from them. This system can be used in many other ways and can benefit users of these Yelp-like websites.
+
+```{r}
+
+dbDisconnect(db)
+
+```
